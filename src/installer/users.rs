@@ -1,10 +1,10 @@
 use ratatui::{crossterm::event::KeyCode, layout::Constraint, text::Line};
 
 use crate::{
-  installer::{HIGHLIGHT, Installer, Page, Signal, systempkgs::get_available_pkgs},
+  installer::{HIGHLIGHT, Installer, Page, Signal},
   split_hor, split_vert, styled_block, ui_back, ui_close, ui_down, ui_enter, ui_up,
   widget::{
-    Button, ConfigWidget, HelpModal, InfoBox, LineEditor, PackagePicker, StrList, TableWidget,
+    Button, ConfigWidget, HelpModal, InfoBox, LineEditor, StrList, TableWidget,
     WidgetBox,
   },
 };
@@ -30,12 +30,6 @@ pub struct User {
   pub groups: Vec<String>,
   #[serde(default = "default_shell")]
   pub shell: String,
-  pub home_manager_cfg: Option<HomeManagerCfg>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct HomeManagerCfg {
-  pub packages: Vec<String>,
 }
 
 impl User {
@@ -45,13 +39,7 @@ impl User {
     } else {
       self.groups.join(", ")
     };
-    let use_hm = if self.home_manager_cfg.is_some() {
-      "yes"
-    } else {
-      "no"
-    }
-    .to_string();
-    vec![self.username.clone(), groups, self.shell.clone(), use_hm]
+    vec![self.username.clone(), groups, self.shell.clone()]
   }
 }
 
@@ -74,7 +62,6 @@ impl UserAccounts {
       "Username".to_string(),
       "Groups".to_string(),
       "Shell".to_string(),
-      "Use Home Manager".to_string(),
     ];
     let mut rows: Vec<Vec<String>> = users.into_iter().map(|u| u.as_table_row()).collect();
     rows.insert(0, vec!["Add a new user".into(), "".into(), "".into()]);
@@ -132,7 +119,7 @@ impl UserAccounts {
         (None, " - Show this help"),
       ],
       vec![(None, "")],
-      vec![(None, "Create user accounts for your NixOS system.")],
+      vec![(None, "Create user accounts for your system.")],
       vec![(
         None,
         "Select 'Add a new user' to create accounts, or select",
@@ -162,7 +149,6 @@ impl UserAccounts {
         "Username".to_string(),
         "Groups".to_string(),
         "Shell".to_string(),
-        "Use Home Manager".to_string(),
       ],
       users.into_iter().map(|u| u.as_table_row()).collect(),
     )))
@@ -348,7 +334,7 @@ impl Page for UserAccounts {
         (None, " - Show this help"),
       ],
       vec![(None, "")],
-      vec![(None, "Create user accounts for your NixOS system.")],
+      vec![(None, "Create user accounts for your system.")],
       vec![(
         None,
         "Select 'Add a new user' to create accounts, or select",
@@ -455,7 +441,7 @@ impl AddUser {
         (None, " - Show this help"),
       ],
       vec![(None, "")],
-      vec![(None, "Create a new user account for your NixOS system.")],
+      vec![(None, "Create a new user account for your system.")],
       vec![(None, "Enter username, password, and confirm password.")],
       vec![(None, "Passwords are hidden during entry for security.")],
     ]);
@@ -482,6 +468,7 @@ impl AddUser {
 
       match normalize_and_validate_username(&entered) {
         Ok(norm) => {
+          self.name_input.clear_error();
           self.username = Some(norm);
           self.name_input.unfocus();
           self.pass_input.focus();
@@ -491,16 +478,47 @@ impl AddUser {
         }
       }
     } else if self.pass_input.is_focused() {
-      self.pass_input.unfocus();
-      self.pass_confirm.focus();
+        self.pass_input.unfocus();
+        self.pass_confirm.focus();
     } else if self.pass_confirm.is_focused() {
-      self.pass_confirm.unfocus();
-      self.shell_list.focus();
+        let pass = self
+          .pass_input
+          .get_value()
+          .and_then(|v| v.as_str().map(|s| s.to_owned()))
+          .unwrap_or_default();
+
+        let confirm = self
+          .pass_confirm
+          .get_value()
+          .and_then(|v| v.as_str().map(|s| s.to_owned()))
+          .unwrap_or_default();
+
+        if pass.is_empty() {
+          self.pass_input.error("Password cannot be empty");
+          self.pass_confirm.unfocus();
+          self.pass_input.focus();
+          return;
+        }
+        if confirm.is_empty() {
+          self.pass_confirm.error("Password confirmation cannot be empty");
+          return;
+        }
+        if pass != confirm {
+          self.pass_confirm.clear();
+          self.pass_confirm.error("Passwords do not match");
+          self.pass_input.unfocus();
+          self.pass_confirm.focus();
+          return;
+        }
+        self.pass_input.clear_error();
+        self.pass_confirm.clear_error();
+        self.pass_confirm.unfocus();
+        self.shell_list.focus();
     } else if self.shell_list.is_focused() {
-      self.shell_list.unfocus();
-      self.name_input.focus(); // wrap
+        self.shell_list.unfocus();
+        self.name_input.focus(); // wrap
     } else {
-      self.name_input.focus();
+        self.name_input.focus();
     }
   }
   pub fn cycle_backward(&mut self) {
@@ -508,16 +526,16 @@ impl AddUser {
       self.name_input.unfocus();
       self.shell_list.focus(); // wrap backwards
     } else if self.pass_input.is_focused() {
-      self.pass_input.unfocus();
-      self.name_input.focus();
+        self.pass_input.unfocus();
+        self.name_input.focus();
     } else if self.pass_confirm.is_focused() {
-      self.pass_confirm.unfocus();
-      self.pass_input.focus();
+        self.pass_confirm.unfocus();
+        self.pass_input.focus();
     } else if self.shell_list.is_focused() {
-      self.shell_list.unfocus();
-      self.pass_confirm.focus();
+        self.shell_list.unfocus();
+        self.pass_confirm.focus();
     } else {
-      self.name_input.focus();
+        self.name_input.focus();
     }
   }
 }
@@ -617,6 +635,7 @@ fn handle_input(
           return Signal::Wait;
         }
 
+        self.name_input.clear_error();
         self.username = Some(normalized);
         self.name_input.unfocus();
         self.pass_input.focus();
@@ -637,6 +656,7 @@ fn handle_input(
             self.pass_input.error("Password cannot be empty");
             return Signal::Wait;
           }
+          self.pass_input.clear_error();
           self.pass_input.unfocus();
           self.pass_confirm.focus();
           Signal::Wait
@@ -663,10 +683,10 @@ fn handle_input(
               return Signal::Wait;
             };
             if pass != confirm {
-              self.pass_input.error("Passwords do not match");
               self.pass_confirm.clear();
-              self.pass_input.focus();
-              self.pass_confirm.unfocus();
+              self.pass_confirm.error("Passwords do not match");
+              self.pass_input.unfocus();
+              self.pass_confirm.focus();
               return Signal::Wait;
             }
 
@@ -702,6 +722,10 @@ fn handle_input(
             // ---- Minimal change: instead of creating the user here,
             // show the shell picker (bash/fish/zsh) and finalize there.
             self.username = Some(username);  // keep normalized
+
+            self.pass_input.clear_error();
+            self.pass_confirm.clear_error();
+
             self.pass_confirm.unfocus();
             self.shell_list.focus();
             Signal::Wait
@@ -749,6 +773,38 @@ fn handle_input(
           self.selected_shell = sel.to_string();
         }
 
+        let pass = self
+          .pass_input
+          .get_value()
+          .and_then(|v| v.as_str().map(|s| s.to_owned()))
+          .unwrap_or_default();
+
+        let confirm = self
+          .pass_confirm
+          .get_value()
+          .and_then(|v| v.as_str().map(|s| s.to_owned()))
+          .unwrap_or_default();
+
+        if pass.is_empty() {
+          self.pass_input.error("Password cannot be empty");
+          self.shell_list.unfocus();
+          self.pass_input.focus();
+          return Signal::Wait;
+        }
+        if confirm.is_empty() {
+          self.pass_confirm.error("Password confirmation cannot be empty");
+          self.shell_list.unfocus();
+          self.pass_confirm.focus();
+          return Signal::Wait;
+        }
+        if pass != confirm {
+          self.pass_confirm.clear();
+          self.pass_confirm.error("Passwords do not match");
+          self.pass_input.unfocus();
+          self.pass_confirm.focus();
+          return Signal::Wait;
+        }
+
         let username = match normalize_and_validate_username(
           &self.username.clone().unwrap_or_default()
         ) {
@@ -768,6 +824,10 @@ fn handle_input(
           return Signal::Wait;
         }
 
+        self.name_input.clear_error();
+        self.pass_input.clear_error();
+        self.pass_confirm.clear_error();
+
         let pass = self
           .pass_input
           .get_value()
@@ -786,7 +846,6 @@ fn handle_input(
           password_hash: hashed,
           groups: vec![],
           shell: self.selected_shell.clone(),
-          home_manager_cfg: None,
         });
         let idx = installer.users.len() - 1;
         self.created_user_idx = Some(idx);
@@ -877,7 +936,7 @@ fn handle_input(
         (None, " - Show this help"),
       ],
       vec![(None, "")],
-      vec![(None, "Create a new user account for your NixOS system.")],
+      vec![(None, "Create a new user account for your system.")],
       vec![(None, "Enter username, password, and confirm password.")],
       vec![(None, "Passwords are hidden during entry for security.")],
     ]);
@@ -914,7 +973,6 @@ impl AlterUser {
       Box::new(Button::new("Change password")) as Box<dyn ConfigWidget>,
       Box::new(Button::new("Change shell")) as Box<dyn ConfigWidget>,
       Box::new(Button::new("Edit Groups")) as Box<dyn ConfigWidget>,
-      Box::new(Button::new("Configure Home Manager")) as Box<dyn ConfigWidget>,
       Box::new(Button::new("Delete user")) as Box<dyn ConfigWidget>,
     ];
     let mut buttons = WidgetBox::button_menu(buttons);
@@ -1132,7 +1190,6 @@ impl AlterUser {
         Box::new(Button::new("Change username")) as Box<dyn ConfigWidget>,
         Box::new(Button::new("Change password")) as Box<dyn ConfigWidget>,
         Box::new(Button::new("Edit Groups")) as Box<dyn ConfigWidget>,
-        Box::new(Button::new("Configure Home Manager")) as Box<dyn ConfigWidget>,
         Box::new(Button::new("Delete user")) as Box<dyn ConfigWidget>,
       ];
       self.buttons.set_children_inplace(buttons);
@@ -1191,16 +1248,6 @@ impl AlterUser {
             Signal::Wait
           }
           Some(4) => {
-            let existing_config = installer
-              .users
-              .get(self.selected_user)
-              .and_then(|user| user.home_manager_cfg.clone());
-            Signal::Push(Box::new(ConfigureHomeManager::new(
-              self.selected_user,
-              existing_config,
-            )))
-          }
-          Some(5) => {
             // Delete user
             if !self.confirming_delete {
               self.confirming_delete = true;
@@ -1208,7 +1255,6 @@ impl AlterUser {
                 Box::new(Button::new("Change username")) as Box<dyn ConfigWidget>,
                 Box::new(Button::new("Change password")) as Box<dyn ConfigWidget>,
                 Box::new(Button::new("Edit Groups")) as Box<dyn ConfigWidget>,
-                Box::new(Button::new("Configure Home Manager")) as Box<dyn ConfigWidget>,
                 Box::new(Button::new("Really?")) as Box<dyn ConfigWidget>,
               ];
               self.buttons.set_children_inplace(buttons);
@@ -1290,6 +1336,7 @@ impl AlterUser {
     if self.pass_input.is_focused() {
       match event.code {
         KeyCode::Tab => {
+          self.pass_input.clear_error();
           self.pass_input.unfocus();
           self.pass_confirm.focus();
           Signal::Wait
@@ -1304,6 +1351,7 @@ impl AlterUser {
               self.pass_input.error("Password cannot be empty");
               return Signal::Wait;
             }
+            self.pass_input.clear_error();
             self.pass_input.unfocus();
             self.pass_confirm.focus();
             Signal::Wait
@@ -1345,9 +1393,10 @@ impl AlterUser {
                 return Signal::Wait;
               };
               if pass != confirm {
-                self.pass_confirm.error("Passwords do not match");
-                self.pass_input.clear();
                 self.pass_confirm.clear();
+                self.pass_confirm.error("Passwords do not match");
+                self.pass_input.unfocus();
+                self.pass_confirm.focus();
                 return Signal::Wait;
               }
               let hashed = match super::RootPassword::mkpasswd(pass.to_string()) {
@@ -1646,274 +1695,5 @@ impl Page for AlterUser {
       vec![(None, "username, password, groups, or deleting the user.")],
     ]);
     ("Alter User".to_string(), help_content)
-  }
-}
-
-pub struct ConfigureHomeManager {
-  pub confirmed: bool,
-  pub picking_pkgs: bool,
-  pub confirm_buttons: WidgetBox,
-  pub configuration_options: WidgetBox,
-  pub package_picker: PackagePicker,
-  pub selected_user: usize,
-  pub confirming_disable: bool,
-}
-
-impl ConfigureHomeManager {
-  pub fn new(selected_user: usize, existing_config: Option<HomeManagerCfg>) -> Self {
-    let buttons = vec![
-      Box::new(Button::new("Yes")) as Box<dyn ConfigWidget>,
-      Box::new(Button::new("No")) as Box<dyn ConfigWidget>,
-    ];
-    let config_options = vec![
-      Box::new(Button::new("Configure User Packages")) as Box<dyn ConfigWidget>,
-      Box::new(Button::new("Disable Home Manager")) as Box<dyn ConfigWidget>,
-    ];
-
-    let mut confirm_buttons = WidgetBox::button_menu(buttons);
-    let mut configuration_options = WidgetBox::button_menu(config_options);
-    if let Some(cfg) = existing_config {
-      configuration_options.focus();
-      let pkgs = get_available_pkgs().unwrap_or_default();
-      let selected_pkgs = cfg.packages.clone();
-      let package_picker = PackagePicker::new(
-        "Selected User Packages",
-        "Available Packages",
-        selected_pkgs,
-        pkgs,
-      );
-      Self {
-        confirmed: true,
-        picking_pkgs: false,
-        confirm_buttons,
-        configuration_options,
-        package_picker,
-        selected_user,
-        confirming_disable: false,
-      }
-    } else {
-      confirm_buttons.focus();
-      let pkgs = get_available_pkgs().unwrap_or_default();
-      let package_picker =
-        PackagePicker::new("Selected User Packages", "Available Packages", vec![], pkgs);
-      Self {
-        confirmed: false,
-        picking_pkgs: false,
-        confirm_buttons,
-        configuration_options,
-        package_picker,
-        selected_user,
-        confirming_disable: false,
-      }
-    }
-  }
-}
-
-impl Page for ConfigureHomeManager {
-  fn render(
-    &mut self,
-    installer: &mut Installer,
-    f: &mut ratatui::Frame,
-    area: ratatui::prelude::Rect,
-  ) {
-    if !self.confirmed {
-      let info_box = InfoBox::new(
-        "Configure Home Manager",
-        styled_block(vec![
-          vec![(None, "Configure Home Manager for this user?")],
-          vec![
-            (None, "This will set up a "),
-            (HIGHLIGHT, "home manager "),
-            (None, "configuration for the user in the "),
-            (HIGHLIGHT, "configuration.nix "),
-            (None, "generated by this installer."),
-          ],
-          vec![
-            (HIGHLIGHT, "Home Manager"),
-            (
-              None,
-              " allows you to declaratively manage your user environment using ",
-            ),
-            (HIGHLIGHT, "Nix"),
-            (None, "."),
-          ],
-        ]),
-      );
-      let vert_chunks = split_vert!(
-        area,
-        1,
-        [Constraint::Percentage(70), Constraint::Percentage(30)]
-      );
-      let hor_chunks = split_hor!(
-        vert_chunks[1],
-        1,
-        [
-          Constraint::Percentage(40),
-          Constraint::Percentage(20),
-          Constraint::Percentage(40),
-        ]
-      );
-
-      info_box.render(f, vert_chunks[0]);
-      self.confirm_buttons.render(f, hor_chunks[1]);
-    } else if self.picking_pkgs {
-      self.package_picker.render(f, area);
-    } else {
-      let table = installer.users.get(self.selected_user).map(|user| {
-        let pkgs = user
-          .home_manager_cfg
-          .as_ref()
-          .map(|cfg| cfg.packages.clone())
-          .unwrap_or_default()
-          .into_iter()
-          .map(|pkg| vec![pkg])
-          .collect();
-        TableWidget::new(
-          "",
-          vec![Constraint::Percentage(100)],
-          vec!["User Packages".into()],
-          pkgs,
-        )
-      });
-      let vert_chunks = split_vert!(
-        area,
-        1,
-        [Constraint::Percentage(50), Constraint::Percentage(50)]
-      );
-      let hor_chunks = split_hor!(
-        vert_chunks[0],
-        1,
-        [
-          Constraint::Percentage(40),
-          Constraint::Percentage(20),
-          Constraint::Percentage(40),
-        ]
-      );
-      self.configuration_options.render(f, hor_chunks[1]);
-      table.unwrap().render(f, vert_chunks[1]);
-    }
-  }
-  fn handle_input(
-    &mut self,
-    installer: &mut Installer,
-    event: ratatui::crossterm::event::KeyEvent,
-  ) -> Signal {
-    if !self.confirmed {
-      match event.code {
-        ui_down!() => {
-          if !self.confirm_buttons.next_child() {
-            self.confirm_buttons.first_child();
-          }
-          Signal::Wait
-        }
-        ui_up!() => {
-          if !self.confirm_buttons.prev_child() {
-            self.confirm_buttons.last_child();
-          }
-          Signal::Wait
-        }
-        KeyCode::Enter => {
-          match self.confirm_buttons.selected_child() {
-            Some(0) => {
-              // Yes
-              self.confirmed = true;
-              self.configuration_options.focus();
-              if self.selected_user < installer.users.len()
-                && installer.users[self.selected_user]
-                  .home_manager_cfg
-                  .is_none()
-              {
-                installer.users[self.selected_user].home_manager_cfg =
-                  Some(HomeManagerCfg { packages: vec![] });
-              }
-              Signal::Wait
-            }
-            Some(1) => {
-              // No
-              if self.selected_user < installer.users.len() {
-                installer.users[self.selected_user].home_manager_cfg = None;
-              }
-              Signal::Pop
-            }
-            _ => Signal::Wait,
-          }
-        }
-        _ => Signal::Wait,
-      }
-    } else if self.picking_pkgs {
-      match event.code {
-        ui_close!() => {
-          if self.package_picker.search_bar.is_focused() {
-            self.package_picker.handle_input(event)
-          } else {
-            let selected = self.package_picker.get_selected_packages();
-            if let Some(user) = installer.users.get_mut(self.selected_user) {
-              if let Some(cfg) = user.home_manager_cfg.as_mut() {
-                cfg.packages = selected;
-              }
-            }
-            self.picking_pkgs = false;
-            Signal::Wait
-          }
-        }
-        _ => self.package_picker.handle_input(event),
-      }
-    } else {
-      if self.confirming_disable && event.code != KeyCode::Enter {
-        self.confirming_disable = false;
-        let config_options = vec![
-          Box::new(Button::new("Configure User Packages")) as Box<dyn ConfigWidget>,
-          Box::new(Button::new("Disable Home Manager")) as Box<dyn ConfigWidget>,
-        ];
-        self
-          .configuration_options
-          .set_children_inplace(config_options);
-      }
-      match event.code {
-        ui_down!() => {
-          if !self.configuration_options.next_child() {
-            self.configuration_options.first_child();
-          }
-          Signal::Wait
-        }
-        ui_up!() => {
-          if !self.configuration_options.prev_child() {
-            self.configuration_options.last_child();
-          }
-          Signal::Wait
-        }
-        ui_close!() => Signal::Pop,
-        KeyCode::Enter => {
-          match self.configuration_options.selected_child() {
-            Some(0) => {
-              // Configure User Packages
-              self.picking_pkgs = true;
-              Signal::Wait
-            }
-            Some(1) => {
-              // Disable Home Manager
-              if !self.confirming_disable {
-                self.confirming_disable = true;
-                let config_options = vec![
-                  Box::new(Button::new("Configure User Packages")) as Box<dyn ConfigWidget>,
-                  Box::new(Button::new("Really?")) as Box<dyn ConfigWidget>,
-                ];
-                self
-                  .configuration_options
-                  .set_children_inplace(config_options);
-                Signal::Wait
-              } else {
-                if self.selected_user < installer.users.len() {
-                  installer.users[self.selected_user].home_manager_cfg = None;
-                }
-                Signal::Pop
-              }
-            }
-            _ => Signal::Wait,
-          }
-        }
-        _ => Signal::Wait,
-      }
-    }
   }
 }
